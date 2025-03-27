@@ -15,28 +15,42 @@ app.get('/theme', (req, res) => {
     const parsedUrl = new URL(storeUrl);
     const client = parsedUrl.protocol === 'https:' ? https : http;
 
-    client.get(storeUrl, (resp) => {
+    client.get(storeUrl, (response) => {
       let data = '';
-      resp.on('data', chunk => data += chunk);
-      resp.on('end', () => {
-        const match = data.match(/Shopify\.theme\s*=\s*({[^;]+});/);
-        if (match) {
-          const json = JSON.parse(match[1].replace(/\\\//g, '/'));
+      response.on('data', chunk => data += chunk);
+      response.on('end', () => {
+        try {
+          // Extract full Shopify object using regex
+          const match = data.match(/Shopify\s*=\s*Shopify\s*\|\|\s*{};([\s\S]*?)Shopify\.routes\s*=\s*Shopify\.routes\s*\|\|/);
+          if (!match) return res.status(404).json({ error: 'Shopify config not found in HTML.' });
+
+          const block = match[0];
+
+          // Extract individual values using regex
+          const shop = block.match(/Shopify\.shop\s*=\s*"([^"]+)"/)?.[1];
+          const themeName = block.match(/Shopify\.theme\s*=\s*{[^}]*"name"\s*:\s*"([^"]+)"/)?.[1];
+          const schemaName = block.match(/"schema_name"\s*:\s*"([^"]+)"/)?.[1];
+          const schemaVersion = block.match(/"schema_version"\s*:\s*"([^"]+)"/)?.[1];
+
+          if (!shop && !themeName && !schemaName) {
+            return res.status(404).json({ error: 'Shopify values not found.' });
+          }
+
           res.json({
-            name: json.name,
-            id: json.id,
-            version: json.schema_version,
-            schema: json.schema_name
+            shop,
+            theme_name: themeName,
+            schema_name: schemaName,
+            schema_version: schemaVersion
           });
-        } else {
-          res.status(404).json({ error: 'Theme not found' });
+        } catch (err) {
+          res.status(500).json({ error: 'Error parsing Shopify data.' });
         }
       });
     }).on('error', () => {
-      res.status(500).json({ error: 'Fetch failed' });
+      res.status(500).json({ error: 'Failed to fetch site.' });
     });
   } catch (err) {
-    res.status(400).json({ error: 'Invalid URL' });
+    res.status(400).json({ error: 'Invalid URL.' });
   }
 });
 
